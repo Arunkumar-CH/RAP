@@ -1,0 +1,221 @@
+*Travel Behavior Definition:
+managed implementation in class zcl_bp_travel_m_xx unique;
+
+define behavior for ZI_TRAVEL_M_XX alias Travel
+persistent table /DMO/TRAVEL
+lock master
+//authorization master ( instance )
+etag master lastchangedat
+{
+  create;
+  update;
+  delete;
+  action createTravelByTemplate result [1] $self;
+
+  // administrative fields: read only
+  field ( readonly ) lastchangedat, lastchangedby, createdat, createdby;
+
+  // mandatory fields that are required to create a travel
+  field ( mandatory ) agency_id, status, booking_fee, currency_code;
+
+  // dynamic field control
+  field (features : instance ) travel_id;
+
+  // dynamic action control
+  action  ( features: instance ) acceptTravel result [1] $self;
+  action  ( features: instance ) rejectTravel result [1] $self;
+
+  association _Booking { create; }
+}
+
+define behavior for ZI_BOOKING_M_XX alias booking
+implementation in class zcl_bp_booking_m_xx unique
+persistent table /dmo/booking
+lock dependent( travel_id = travel_id)
+//authorization dependent( <local_field_name> = <target_field_name> )
+etag master lastchangedat
+{
+  update;
+  delete;
+
+  // static field control
+  field ( mandatory ) carrier_id, connection_id, flight_date;
+  field ( readonly ) travel_id;
+
+  // dynamic field control
+  field (features : instance ) booking_id, booking_date, customer_id;
+}
+
+
+
+
+
+*Travel Behavior Implementation class: 
+*"* use this source file for the definition and implementation of
+*"* local helper classes, interface definitions and type
+*"* declarations
+CLASS lhc_travel DEFINITION INHERITING FROM cl_abap_behavior_handler.
+
+  PRIVATE SECTION.
+
+    METHODS copy_travel FOR MODIFY IMPORTING keys FOR ACTION travel~createTravelByTemplate RESULT result.
+
+    METHODS set_status_completed FOR MODIFY IMPORTING keys FOR ACTION travel~acceptTravel  RESULT result.
+
+    METHODS reject_travel FOR MODIFY IMPORTING keys FOR ACTION travel~rejectTravel  RESULT result.
+
+    METHODS get_features FOR FEATURES IMPORTING keys REQUEST requested_features FOR travel RESULT result.
+
+
+
+ENDCLASS.
+
+CLASS lhc_travel IMPLEMENTATION.
+
+  METHOD copy_travel.
+
+    SELECT MAX( travel_id ) FROM /dmo/travel INTO @DATA(lv_travel_id).
+
+    READ ENTITY zi_travel_m_xx FROM VALUE #( FOR travel IN keys
+                                 (  %key     = travel-%key
+                                    %control = VALUE #( travel_id     = if_abap_behv=>mk-on
+                                                        agency_id     = if_abap_behv=>mk-on
+                                                        customer_id   = if_abap_behv=>mk-on
+                                                        booking_fee   = if_abap_behv=>mk-on
+                                                        total_price   = if_abap_behv=>mk-on
+                                                        currency_code = if_abap_behv=>mk-on
+                                                                         ) ) )
+                RESULT    DATA(lt_read_result)
+                FAILED    failed
+                REPORTED  reported.
+
+    DATA(lv_today) = cl_abap_context_info=>get_system_date( ).
+
+    DATA lt_create TYPE TABLE FOR CREATE ZI_Travel_M_XX\\travel.
+
+    lt_create = VALUE #( FOR row IN  lt_read_result INDEX INTO idx
+                             ( travel_id      = lv_travel_id + idx
+                               agency_id      = row-agency_id
+                               customer_id    = row-customer_id
+                               begin_date     = lv_today
+                               end_date       = lv_today + 30
+                               booking_fee    = row-booking_fee
+                               total_price    = row-total_price
+                               currency_code  = row-currency_code
+                               description    = 'Enter your comments here'
+                               status = 'O' " Open
+                               %control       = VALUE #( travel_id      = if_abap_behv=>mk-on
+                                                         agency_id      = if_abap_behv=>mk-on
+                                                         customer_id    = if_abap_behv=>mk-on
+                                                         begin_date     = if_abap_behv=>mk-on
+                                                         end_date       = if_abap_behv=>mk-on
+                                                         booking_fee    = if_abap_behv=>mk-on
+                                                         total_price    = if_abap_behv=>mk-on
+                                                         currency_code  = if_abap_behv=>mk-on
+                                                         description    = if_abap_behv=>mk-on
+                                                         status = if_abap_behv=>mk-on ) ) ) .
+
+    MODIFY ENTITIES OF zi_travel_m_xx IN LOCAL MODE
+          ENTITY travel
+       CREATE FROM lt_create
+         MAPPED   mapped
+         FAILED   failed
+         REPORTED reported.
+
+    result = VALUE #( FOR create IN  lt_create INDEX INTO idx
+                             ( %cid_ref = keys[ idx ]-%cid_ref
+                               %key     = keys[ idx ]-travel_id
+                               %param   = CORRESPONDING #(  create ) ) ) .
+
+
+
+  ENDMETHOD.
+
+  METHOD set_status_completed.
+
+    " Modify in local mode
+    MODIFY ENTITIES OF zi_travel_m_xx IN LOCAL MODE
+           ENTITY travel
+              UPDATE FROM VALUE #( FOR key IN keys ( travel_id = key-travel_id
+                                                     status = 'A' " Accepted
+                                                     %control-status = if_abap_behv=>mk-on ) )
+           FAILED   failed
+           REPORTED reported.
+
+  ENDMETHOD.
+
+  METHOD reject_travel.
+
+    " Modify in local mode
+    MODIFY ENTITIES OF zi_travel_m_xx IN LOCAL MODE
+           ENTITY travel
+              UPDATE FROM VALUE #( FOR key IN keys ( travel_id = key-travel_id
+                                                     status = 'X' " Rejected
+                                                     %control-status = if_abap_behv=>mk-on ) )
+           FAILED   failed
+           REPORTED reported.
+
+  ENDMETHOD.
+
+  METHOD get_features.
+
+READ ENTITIES OF zi_travel_m_xx IN LOCAL MODE
+    ENTITY Travel
+    FIELDS ( status )
+    WITH CORRESPONDING #( keys )
+    RESULT DATA(lt_travel_result)
+    FAILED failed.
+
+    result = VALUE #( FOR ls_travel IN lt_travel_result
+                       (         %tky                   = ls_travel-%tky
+                         %field-travel_id               = if_abap_behv=>fc-f-read_only
+                         %features-%action-rejectTravel = COND #( WHEN ls_travel-status = 'X'
+                                                                    THEN if_abap_behv=>fc-o-disabled ELSE if_abap_behv=>fc-o-enabled  )
+                         %features-%action-acceptTravel = COND #( WHEN ls_travel-status = 'A'
+                                                                    THEN if_abap_behv=>fc-o-disabled ELSE if_abap_behv=>fc-o-enabled  )
+                      ) ).
+  ENDMETHOD.
+
+
+ENDCLASS.
+
+
+*Booking Implementation class
+*"* use this source file for the definition and implementation of
+*"* local helper classes, interface definitions and type
+*"* declarations
+CLASS lhc_travel DEFINITION INHERITING FROM cl_abap_behavior_handler.
+  PRIVATE SECTION.
+
+    METHODS get_features FOR FEATURES IMPORTING keys REQUEST requested_features FOR booking RESULT result.
+
+ENDCLASS.
+
+CLASS lhc_travel IMPLEMENTATION.
+
+
+  METHOD get_features.
+
+READ ENTITIES OF ZI_Travel_M_XX IN LOCAL MODE
+       ENTITY Booking
+         FIELDS ( carrier_id )
+         WITH CORRESPONDING #( keys )
+       RESULT DATA(lt_booking_result)
+       FAILED failed.
+
+
+
+    result = VALUE #( FOR ls_booking IN lt_booking_result
+                       (  %tky                      = ls_booking-%tky
+                         %field-booking_id   = if_abap_behv=>fc-f-read_only
+                         %field-booking_date = if_abap_behv=>fc-f-read_only
+                         %field-customer_id  = COND #( WHEN ls_booking-carrier_id = 'AA'
+                                                          THEN if_abap_behv=>fc-f-read_only
+                                                          ELSE if_abap_behv=>fc-f-unrestricted  )
+                      ) ).
+
+  ENDMETHOD.
+
+
+ENDCLASS.
+

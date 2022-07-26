@@ -1,0 +1,41 @@
+CLASS zcl_eml_travel_delete_xx DEFINITION
+  PUBLIC
+  FINAL
+  CREATE PUBLIC .
+
+  PUBLIC SECTION.
+    INTERFACES if_oo_adt_classrun.
+  PROTECTED SECTION.
+  PRIVATE SECTION.
+ENDCLASS.
+
+
+
+CLASS ZCL_EML_TRAVEL_DELETE_XX IMPLEMENTATION.
+
+
+  METHOD if_oo_adt_classrun~main.
+
+    DATA(lv_travel_uuid_to_delete)    = '42010AEEC82A1EEBB3E996BB5054741C'.  " Valid UUID
+
+    MODIFY ENTITIES OF zi_travel_u_xx
+      " Delete travel and all child instances (booking, booking supplements)
+      ENTITY travel
+           DELETE FROM VALUE #( ( traveluuid  = lv_travel_uuid_to_delete ) )
+      REPORTED DATA(ls_reported)
+      FAILED   DATA(ls_failed).
+
+      READ ENTITIES OF zi_travel_u_xx
+          ENTITY travel ALL FIELDS WITH
+            VALUE #( ( TravelUUID = lv_travel_uuid_to_delete ) )
+            RESULT DATA(lt_received_travel_data)
+      REPORTED ls_reported
+      FAILED   ls_failed.
+
+    out->write( lt_received_travel_data ).
+
+    " Persist changed travel data in the database
+    COMMIT ENTITIES.
+
+  ENDMETHOD.
+ENDCLASS.

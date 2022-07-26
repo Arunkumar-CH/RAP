@@ -1,0 +1,46 @@
+  METHOD check_authority_for_travel.
+
+    DATA ls_result LIKE LINE OF rt_result.
+
+    READ ENTITIES OF zi_travel_m_tr "in local mode
+     ENTITY travel
+      FIELDS ( travel_id customer_id status CountryCode )
+        WITH VALUE #( FOR keyval IN it_travel_key ( %tky = keyval-%tky ) )
+      RESULT DATA(lt_travel)
+      FAILED DATA(ls_read_failed).
+
+    LOOP AT lt_travel INTO DATA(ls_travel).
+
+*" Authorization check for countries with Create/Update authorization
+      AUTHORITY-CHECK OBJECT 'ZCUSTCNTRY'
+        ID 'ZCUSTCTRY' FIELD ls_travel-CountryCode
+        ID 'ACTVT' FIELD '01' .
+
+      IF sy-subrc = 0.
+        DATA(lv_authorized) = abap_true.
+      ELSE.
+        lv_authorized = abap_false.
+      ENDIF.
+
+*" For US/FR Country User do not have edit authorizations
+      ls_result = VALUE #( travel_id   = ls_travel-travel_id
+                           %update
+                           = COND #( WHEN lv_authorized EQ abap_false
+                                      THEN if_abap_behv=>auth-unauthorized ELSE if_abap_behv=>auth-allowed  )
+                           %delete
+                           = COND #( WHEN lv_authorized EQ abap_false
+                                      THEN if_abap_behv=>auth-unauthorized ELSE if_abap_behv=>auth-allowed  )
+                            %action-rejectTravel
+                            = COND #( WHEN lv_authorized EQ abap_false
+                                      THEN if_abap_behv=>auth-unauthorized ELSE if_abap_behv=>auth-allowed  )
+                            %action-acceptTravel
+                            = COND #( WHEN lv_authorized EQ abap_false
+                                      THEN if_abap_behv=>auth-unauthorized ELSE if_abap_behv=>auth-allowed  )
+                           %action-createTravelByTemplate
+                            = COND #( WHEN lv_authorized EQ abap_false
+                                      THEN if_abap_behv=>auth-unauthorized ELSE if_abap_behv=>auth-allowed  ) ).
+
+      APPEND ls_result TO rt_result.
+    ENDLOOP.
+
+  ENDMETHOD.

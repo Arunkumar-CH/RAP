@@ -1,0 +1,17 @@
+projection;
+
+define behavior for ZC_TRAVEL_PROCESSOR_M_XX //alias <alias_name>
+use etag
+{
+  use create;
+  use update;
+  use delete;
+  use association _BOOKING { create; }
+}
+
+define behavior for ZC_BOOKING_PROCESSOR_M_XX //alias <alias_name>
+{
+  use update;
+  use delete;
+  use association _Travel;
+}

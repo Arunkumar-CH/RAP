@@ -1,0 +1,143 @@
+*Travel Behavior Definition:
+managed implementation in class zcl_bp_travel_m_xx unique;
+
+define behavior for ZI_TRAVEL_M_XX alias Travel
+persistent table /DMO/TRAVEL
+lock master
+//authorization master ( instance )
+etag master lastchangedat
+{
+  create;
+  update;
+  delete;
+  action createTravelByTemplate result [1] $self;
+  association _Booking { create; }
+}
+
+define behavior for ZI_BOOKING_M_XX //alias <alias_name>
+persistent table /dmo/booking
+lock dependent( travel_id = travel_id)
+//authorization dependent( <local_field_name> = <target_field_name> )
+etag master lastchangedat
+{
+  update;
+  delete;
+}
+
+
+
+
+*Behavior Implementation class: 
+
+*"* use this source file for the definition and implementation of
+*"* local helper classes, interface definitions and type
+*"* declarations
+CLASS lhc_travel DEFINITION INHERITING FROM cl_abap_behavior_handler.
+
+  PRIVATE SECTION.
+
+    METHODS copy_travel FOR MODIFY IMPORTING keys FOR ACTION travel~createTravelByTemplate RESULT result.
+
+
+ENDCLASS.
+
+CLASS lhc_travel IMPLEMENTATION.
+
+  METHOD copy_travel.
+
+     SELECT MAX( travel_id ) FROM /dmo/travel INTO @DATA(lv_travel_id). "#EC CI_NOWHERE
+
+    READ ENTITIES OF zi_travel_m_xx IN LOCAL MODE
+      ENTITY travel
+         FIELDS ( travel_id
+                  agency_id
+                  customer_id
+                  booking_fee
+                  total_price
+                  currency_code )
+           WITH CORRESPONDING #( keys )
+         RESULT    DATA(lt_read_result)
+         FAILED    failed
+         REPORTED  reported.
+
+    DATA(lv_today) = cl_abap_context_info=>get_system_date( ).
+
+    DATA lt_create TYPE TABLE FOR CREATE ZI_Travel_M_XX\\travel.
+
+    lt_create = VALUE #( FOR row IN  lt_read_result INDEX INTO idx
+
+                             ( %cid = row-travel_id
+                               travel_id      = lv_travel_id + idx
+                               agency_id      = row-agency_id
+                               customer_id    = row-customer_id
+                               begin_date     = lv_today
+                               end_date       = lv_today + 30
+                               booking_fee    = row-booking_fee
+                               total_price    = row-total_price
+                               currency_code  = row-currency_code
+                               description    = 'Enter your comments here'
+                               status = 'O' ) ). " Open
+
+
+    MODIFY ENTITIES OF zi_travel_m_xx IN LOCAL MODE
+        ENTITY travel
+           CREATE FIELDS (    travel_id
+                              agency_id
+                              customer_id
+                              begin_date
+                              end_date
+                              booking_fee
+                              total_price
+                              currency_code
+                              description
+                              status )
+           WITH lt_create
+         MAPPED   mapped
+         FAILED   DATA(failed_modify)
+         REPORTED DATA(reported_modify).
+
+    failed-travel   = CORRESPONDING #( BASE ( failed-travel )   failed_modify-travel   MAPPING travel_id = %cid ).
+    reported-travel = CORRESPONDING #( BASE ( reported-travel ) reported_modify-travel MAPPING travel_id = %cid ).
+
+
+    READ ENTITIES OF zi_travel_m_xx IN LOCAL MODE
+      ENTITY travel
+        ALL FIELDS WITH
+        CORRESPONDING #( mapped-travel )
+    RESULT DATA(lt_read_created).
+
+    result = VALUE #( FOR key IN  mapped-travel  INDEX INTO idx
+                               ( %cid_ref = keys[ KEY entity %key = key-%cid ]-%cid_ref
+                                 %key     = key-%cid
+                                 %param-%tky   = key-%tky ) ) .
+
+    result = CORRESPONDING #( result FROM lt_read_created USING KEY entity  %key = %param-%key MAPPING %param = %data EXCEPT * ).
+
+
+
+  ENDMETHOD.
+
+
+ENDCLASS.
+
+
+*Travel Processor Behavior Definition :
+
+projection;
+
+define behavior for ZC_TRAVEL_PROCESSOR_M_XX //alias <alias_name>
+{
+  use create;
+  use update;
+  use delete;
+  use action createTravelByTemplate;
+  use association _BOOKING { create; }
+}
+
+define behavior for ZC_BOOKING_PROCESSOR_M_XX //alias <alias_name>
+{
+  use update;
+  use delete;
+}
+
+

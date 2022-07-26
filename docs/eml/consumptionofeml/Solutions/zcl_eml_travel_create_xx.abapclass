@@ -1,0 +1,66 @@
+CLASS zcl_eml_travel_create_xx DEFINITION
+  PUBLIC
+  FINAL
+  CREATE PUBLIC .
+
+  PUBLIC SECTION.
+    INTERFACES if_oo_adt_classrun.
+  PROTECTED SECTION.
+  PRIVATE SECTION.
+ENDCLASS.
+
+
+
+CLASS zcl_eml_travel_create_xx IMPLEMENTATION.
+  METHOD if_oo_adt_classrun~main.
+
+    DATA gv_customer_id  TYPE /dmo/customer_id.
+
+    DATA(lv_description)  = 'Intro to EML'.
+    DATA(lv_agency_id)    = '070048'.
+    DATA(lv_my_agency_id) = '0700999'.
+
+    " Get valid customer ID
+    SELECT SINGLE customer_id FROM /dmo/customer INTO @gv_customer_id.
+
+    " Create a new travel > booking > booking supplement
+    MODIFY ENTITIES OF zi_travel_u_xx
+      ENTITY Travel
+             CREATE FIELDS ( agencyid customerid begindate enddate memo status )
+                    WITH VALUE #( ( %cid       = 'CID_100'    " Preliminary ID for new travel instance
+                                    agencyid   = lv_agency_id
+                                    customerid = gv_customer_id
+                                    begindate  = '20190308'
+                                    enddate    = '20190327'
+                                    memo = lv_description
+                                    status     = CONV #( /dmo/if_flight_legacy=>travel_status-new ) ) )
+            " Update data of travel instance
+             UPDATE FIELDS ( agencyid memo status )
+                    WITH VALUE #( ( %cid_ref   = 'CID_100'    " Refers to travel instance
+                                    agencyid   = lv_my_agency_id
+                                    memo       = 'Changed Agency and Status!'
+                                    status     = CONV #( /dmo/if_flight_legacy=>travel_status-planned ) ) )
+       MAPPED   DATA(ls_mapped)
+       FAILED   DATA(ls_failed)
+       REPORTED DATA(ls_reported).
+
+       READ ENTITIES OF zi_travel_u_xx
+          ENTITY travel
+          FIELDS ( agencyid memo )
+            WITH VALUE #( ( TravelUUID = ls_mapped-travel[ 1 ]-TravelUUID ) )
+            RESULT DATA(lt_received_travel_data)
+      REPORTED ls_reported
+      FAILED   ls_failed.
+
+    out->write( lt_received_travel_data ).
+
+    COMMIT ENTITIES.
+    " Check criteria of success
+    IF sy-subrc = 0.
+      out->write( 'Successful COMMIT!' ).
+    ELSE.
+      out->write( 'COMMIT failed!' ).
+    ENDIF.
+
+  ENDMETHOD.
+ENDCLASS.

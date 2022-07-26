@@ -1,0 +1,129 @@
+*Travel Behavior Definition:
+managed implementation in class zcl_bp_travel_m_xx unique;
+
+define behavior for ZI_TRAVEL_M_XX alias Travel
+persistent table /DMO/TRAVEL
+lock master
+//authorization master ( instance )
+etag master lastchangedat
+{
+  create;
+  update;
+  delete;
+  action createTravelByTemplate result [1] $self;
+  action acceptTravel result [1] $self;
+  association _Booking { create; }
+}
+
+define behavior for ZI_BOOKING_M_XX //alias <alias_name>
+persistent table /dmo/booking
+lock dependent( travel_id = travel_id)
+//authorization dependent( <local_field_name> = <target_field_name> )
+etag master lastchangedat
+{
+  update;
+  delete;
+}
+
+
+*Behavior Implementation class: 
+
+*"* use this source file for the definition and implementation of
+*"* local helper classes, interface definitions and type
+*"* declarations
+CLASS lhc_travel DEFINITION INHERITING FROM cl_abap_behavior_handler.
+
+  PRIVATE SECTION.
+
+    METHODS copy_travel FOR MODIFY IMPORTING keys FOR ACTION travel~createTravelByTemplate RESULT result.
+
+    METHODS set_status_completed FOR MODIFY IMPORTING keys FOR ACTION travel~acceptTravel  RESULT result.
+
+
+ENDCLASS.
+
+CLASS lhc_travel IMPLEMENTATION.
+
+  METHOD copy_travel.
+
+    SELECT MAX( travel_id ) FROM /dmo/travel INTO @DATA(lv_travel_id).
+
+    READ ENTITY zi_travel_m_xx FROM VALUE #( FOR travel IN keys
+                                 (  %key     = travel-%key
+                                    %control = VALUE #( travel_id     = if_abap_behv=>mk-on
+                                                        agency_id     = if_abap_behv=>mk-on
+                                                        customer_id   = if_abap_behv=>mk-on
+                                                        booking_fee   = if_abap_behv=>mk-on
+                                                        total_price   = if_abap_behv=>mk-on
+                                                        currency_code = if_abap_behv=>mk-on
+                                                                         ) ) )
+                RESULT    DATA(lt_read_result)
+                FAILED    failed
+                REPORTED  reported.
+
+    DATA(lv_today) = cl_abap_context_info=>get_system_date( ).
+
+    DATA lt_create TYPE TABLE FOR CREATE ZI_Travel_M_XX\\travel.
+
+    lt_create = VALUE #( FOR row IN  lt_read_result INDEX INTO idx
+                             ( travel_id      = lv_travel_id + idx
+                               agency_id      = row-agency_id
+                               customer_id    = row-customer_id
+                               begin_date     = lv_today
+                               end_date       = lv_today + 30
+                               booking_fee    = row-booking_fee
+                               total_price    = row-total_price
+                               currency_code  = row-currency_code
+                               description    = 'Enter your comments here'
+                               status = 'O' " Open
+                               %control       = VALUE #( travel_id      = if_abap_behv=>mk-on
+                                                         agency_id      = if_abap_behv=>mk-on
+                                                         customer_id    = if_abap_behv=>mk-on
+                                                         begin_date     = if_abap_behv=>mk-on
+                                                         end_date       = if_abap_behv=>mk-on
+                                                         booking_fee    = if_abap_behv=>mk-on
+                                                         total_price    = if_abap_behv=>mk-on
+                                                         currency_code  = if_abap_behv=>mk-on
+                                                         description    = if_abap_behv=>mk-on
+                                                         status = if_abap_behv=>mk-on ) ) ) .
+
+    MODIFY ENTITIES OF zi_travel_m_xx IN LOCAL MODE
+          ENTITY travel
+       CREATE FROM lt_create
+         MAPPED   mapped
+         FAILED   failed
+         REPORTED reported.
+
+    result = VALUE #( FOR create IN  lt_create INDEX INTO idx
+                             ( %cid_ref = keys[ idx ]-%cid_ref
+                               %key     = keys[ idx ]-travel_id
+                               %param   = CORRESPONDING #(  create ) ) ) .
+
+
+
+  ENDMETHOD.
+
+  METHOD set_status_completed.
+
+    MODIFY ENTITIES OF zi_travel_m_xx IN LOCAL MODE
+ ENTITY Travel
+   UPDATE FIELDS (  status )
+   WITH VALUE #( FOR key IN keys ( %tky          = key-%tky
+                                   status = 'A' ) )
+FAILED failed
+REPORTED reported.
+
+    "Read changed data for action result
+    READ ENTITIES OF zi_travel_m_xx IN LOCAL MODE
+      ENTITY Travel
+        ALL FIELDS WITH
+        CORRESPONDING #( keys )
+      RESULT DATA(lt_travel).
+
+    result = VALUE #( FOR travel IN lt_travel ( %tky   = travel-%tky
+                                                %param = travel ) ).
+  ENDMETHOD.
+
+
+ENDCLASS.
+

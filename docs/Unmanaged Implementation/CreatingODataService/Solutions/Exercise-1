@@ -1,0 +1,9 @@
+@EndUserText.label: 'Service Definition for Managing Travel'
+define service ZI_TRAVEL_U_SD_XX {
+  expose ZI_TRAVEL_U_XX as Travel;
+  expose ZI_Agency_U_XX as TravelAgency;
+  expose ZI_CUSTOMER_U_XX as Passenger;
+  expose I_Currency as Currency;
+  expose I_Country as Country;
+}
+

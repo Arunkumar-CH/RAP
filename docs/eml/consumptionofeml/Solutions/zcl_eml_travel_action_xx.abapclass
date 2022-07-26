@@ -1,0 +1,42 @@
+CLASS zcl_eml_travel_action_xx DEFINITION
+  PUBLIC
+  FINAL
+  CREATE PUBLIC .
+
+  PUBLIC SECTION.
+    INTERFACES if_oo_adt_classrun.
+  PROTECTED SECTION.
+  PRIVATE SECTION.
+ENDCLASS.
+
+
+
+CLASS ZCL_EML_TRAVEL_ACTION_XX IMPLEMENTATION.
+
+
+  METHOD if_oo_adt_classrun~main.
+
+    DATA(lv_travel_uuid)     = '42010AEEC82A1EEBB3BFA80707C5EF70'. " Valid travel UUID
+
+    " EXECUTE action for travel data
+    MODIFY ENTITY ZI_Travel_U_XX
+           EXECUTE set_status_booked
+                FROM VALUE #( ( traveluuid = lv_travel_uuid ) )
+                RESULT DATA(lt_set_status_booked)
+           FAILED   DATA(ls_failed)
+           REPORTED DATA(ls_reported).
+
+    " Output result data on the console
+    out->write( lt_set_status_booked[ 1 ]-%param ).
+
+    " Persist changed travel data in the database
+    COMMIT ENTITIES.
+        " Check criteria of success
+    IF SY-subrc = 0.
+     out->write( 'Successful COMMIT!' ).
+     ELSE.
+     out->write( 'COMMIT failed!' ).
+    ENDIF.
+
+  ENDMETHOD.
+ENDCLASS.

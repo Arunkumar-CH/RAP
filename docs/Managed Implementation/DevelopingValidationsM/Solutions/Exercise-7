@@ -1,0 +1,167 @@
+*Travel BO Behavior Definition:
+managed implementation in class zcl_bp_travel_m_xx unique;
+
+define behavior for ZI_TRAVEL_M_XX alias Travel
+persistent table /dmo/travel
+lock master
+//authorization master ( instance )
+etag master lastchangedat
+{
+  create;
+  update;
+  delete;
+  action createTravelByTemplate result [1] $self;
+
+  // administrative fields: read only
+  field ( readonly ) lastchangedat, lastchangedby, createdat, createdby;
+
+  // mandatory fields that are required to create a travel
+  field ( mandatory ) agency_id, status, booking_fee, currency_code;
+
+  // dynamic field control
+  field ( features : instance ) travel_id;
+
+  // dynamic action control
+  action ( features : instance ) acceptTravel result [1] $self;
+  action ( features : instance ) rejectTravel result [1] $self;
+
+  validation validateCustomer on save { field customer_id; }
+  validation validateDates on save { field begin_date, end_date; }
+  validation validateStatus on save { field status; }
+
+  association _Booking { create; }
+}
+
+define behavior for ZI_BOOKING_M_XX alias booking
+implementation in class zcl_bp_booking_m_xx unique
+persistent table /dmo/booking
+lock dependent ( travel_id = travel_id )
+//authorization dependent( <local_field_name> = <target_field_name> )
+etag master lastchangedat
+{
+  update;
+  delete;
+
+  // static field control
+  field ( mandatory ) carrier_id, connection_id, flight_date;
+  field ( readonly ) travel_id;
+
+  // dynamic field control
+  field ( features : instance ) booking_id, booking_date, customer_id;
+
+  determination calculateTotalFlightPrice on modify { field flight_price, currency_code; create; }
+}
+
+
+*Booking Behavior Implementation class:
+
+*"* use this source file for the definition and implementation of
+*"* local helper classes, interface definitions and type
+*"* declarations
+CLASS lhc_travel DEFINITION INHERITING FROM cl_abap_behavior_handler.
+  PRIVATE SECTION.
+
+    METHODS get_features FOR FEATURES IMPORTING keys REQUEST requested_features FOR booking RESULT result.
+
+    METHODS calculate_total_flight_price FOR DETERMINATION booking~calculateTotalFlightPrice
+      IMPORTING keys FOR booking.
+
+ENDCLASS.
+
+CLASS lhc_travel IMPLEMENTATION.
+
+
+  METHOD get_features.
+
+    READ ENTITY zi_booking_m_xx FROM VALUE #( FOR keyval IN keys
+                                                      (  %key                  = keyval-%key
+                                                         %control-booking_id   = if_abap_behv=>mk-on
+                                                         %control-booking_date = if_abap_behv=>mk-on
+                                                         %control-customer_id  = if_abap_behv=>mk-on
+                                                      ) )
+                                 RESULT    DATA(lt_booking_result).
+
+    result = VALUE #( FOR ls_travel IN lt_booking_result
+                       ( %key                = ls_travel-%key
+                         %field-booking_id   = if_abap_behv=>fc-f-read_only
+                         %field-booking_date = if_abap_behv=>fc-f-read_only
+                         %field-customer_id  = if_abap_behv=>fc-f-read_only
+                      ) ).
+
+  ENDMETHOD.
+
+  METHOD calculate_total_flight_price.
+
+
+
+     TYPES: BEGIN OF ty_amount_per_currencycode,
+             amount        TYPE /dmo/total_price,
+             currency_code TYPE /dmo/currency_code,
+           END OF ty_amount_per_currencycode.
+
+    DATA: amount_per_currencycode TYPE STANDARD TABLE OF ty_amount_per_currencycode.
+
+
+    " Read all relevant travel instances.
+    READ ENTITIES OF zi_travel_m_xx IN LOCAL MODE
+         ENTITY Travel
+            FIELDS ( booking_fee currency_code )
+            WITH CORRESPONDING #( keys )
+         RESULT DATA(lt_travel).
+
+
+    DELETE lt_travel WHERE currency_code IS INITIAL.
+
+    LOOP AT lt_travel ASSIGNING FIELD-SYMBOL(<fs_travel>).
+      " Set the start for the calculation by adding the booking fee.
+      amount_per_currencycode = VALUE #( ( amount        = <fs_travel>-booking_fee
+                                           currency_code = <fs_travel>-currency_code ) ).
+
+      " Read all associated bookings and add them to the total price.
+      READ ENTITIES OF zi_travel_m_xx IN LOCAL MODE
+        ENTITY Travel BY \_Booking
+          FIELDS ( flight_price currency_code )
+        WITH VALUE #( ( %tky = <fs_travel>-%tky ) )
+        RESULT DATA(lt_booking).
+
+      LOOP AT lt_booking INTO DATA(booking) WHERE currency_code IS NOT INITIAL.
+        COLLECT VALUE ty_amount_per_currencycode( amount        = booking-flight_price
+                                                  currency_code = booking-currency_code ) INTO amount_per_currencycode.
+      ENDLOOP.
+
+
+
+      CLEAR <fs_travel>-total_price.
+      LOOP AT amount_per_currencycode INTO DATA(single_amount_per_currencycode).
+        " If needed do a Currency Conversion
+        IF single_amount_per_currencycode-currency_code = <fs_travel>-currency_code.
+          <fs_travel>-total_price += single_amount_per_currencycode-amount.
+        ELSE.
+          TRY  .
+              /dmo/cl_flight_amdp=>convert_currency(
+                 EXPORTING
+                   iv_amount                   =  single_amount_per_currencycode-amount
+                   iv_currency_code_source     =  single_amount_per_currencycode-currency_code
+                   iv_currency_code_target     =  <fs_travel>-currency_code
+                   iv_exchange_rate_date       =  cl_abap_context_info=>get_system_date( )
+                 IMPORTING
+                   ev_amount                   = DATA(total_booking_price_per_curr)
+                ).
+            CATCH cx_amdp_execution_failed.
+
+          ENDTRY.
+          <fs_travel>-total_price += total_booking_price_per_curr.
+        ENDIF.
+      ENDLOOP.
+    ENDLOOP.
+
+    " write back the modified total_price of travels
+    MODIFY ENTITIES OF ZI_TRAVEl_M_XX IN LOCAL MODE
+      ENTITY travel
+        UPDATE FIELDS ( total_price )
+        WITH CORRESPONDING #( lt_travel ).
+
+  ENDMETHOD.
+
+
+ENDCLASS.

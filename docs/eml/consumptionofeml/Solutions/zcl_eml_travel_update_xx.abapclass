@@ -1,0 +1,72 @@
+CLASS zcl_eml_travel_update_xx DEFINITION
+  PUBLIC
+  FINAL
+  CREATE PUBLIC .
+
+  PUBLIC SECTION.
+    INTERFACES if_oo_adt_classrun.
+  PROTECTED SECTION.
+  PRIVATE SECTION.
+ENDCLASS.
+
+
+
+CLASS ZCL_EML_TRAVEL_UPDATE_XX IMPLEMENTATION.
+
+
+  METHOD if_oo_adt_classrun~main.
+
+
+**********************************************************************
+* STEP 1 - After executing the CDS View - zi_travel_u_xx get
+*          the travel id and agency id data which you want to change
+
+    "DATA(lv_travel_id)     = '99911140'. " Valid travel ID
+    DATA(lv_travel_uuid)     = '42010AEEC82A1EEBB3BFA80707C5EF70'. " Valid travel UUID
+    DATA(lv_description)   = 'Changed Travel Agency'.
+    DATA(lv_new_agency_id) = '070003'.   " Valid agency ID
+**********************************************************************
+
+**********************************************************************
+* STEP 2 - Modify the data- agency id and memo using Unmanaged Behavior
+*          and use Failed and reported data for feedback
+    " UPDATE travel data
+    MODIFY ENTITY zi_travel_u_xx
+    UPDATE FIELDS ( agencyid memo ) WITH
+            VALUE #( (
+              TravelUUID        = lv_travel_uuid
+              agencyid          = lv_new_agency_id
+              memo              = lv_description ) )
+    FAILED   DATA(ls_failed)
+    REPORTED DATA(ls_reported).
+
+**********************************************************************
+
+**********************************************************************
+* STEP 3 - Use READ ENTITY to get the updated data and check if its
+*          updated or not in transactional buffer
+
+    " Read travel data from transactional buffer
+    CLEAR: ls_reported, ls_failed.
+        READ ENTITY zi_travel_u_xx
+            FIELDS ( agencyid memo )
+            WITH VALUE #( ( TravelUUID = lv_travel_uuid ) )
+            RESULT DATA(lt_received_travel_data)
+      REPORTED ls_reported
+      FAILED   ls_failed.
+
+    " Output result data on the console
+    out->write( lt_received_travel_data ).
+**********************************************************************
+
+    " Persist changed travel data in the database
+    COMMIT ENTITIES.
+        " Check criteria of success
+    IF SY-subrc = 0.
+     out->write( 'Successful COMMIT!' ).
+     ELSE.
+     out->write( 'COMMIT failed!' ).
+    ENDIF.
+
+  ENDMETHOD.
+ENDCLASS.
